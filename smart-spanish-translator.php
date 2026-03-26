@@ -2,20 +2,20 @@
 /**
  * Plugin Name: Smart Spanish Translator
  * Description: Auto-translates WordPress content to Spanish, respecting manually translated pages.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Diana BluShark
  * Text Domain: smart-spanish-translator
  */
 defined('ABSPATH') || exit;
 
-define('SST_VERSION', '1.0.0');
+define('SST_VERSION', '1.1.0');
 define('SST_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 // ─── GitHub Updater ───────────────────────────────────────────────────────────
 if (file_exists(SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php')) {
     require SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php';
-    $sstUpdateChecker = Puc_v4_Factory::buildUpdateChecker(
+    $sstUpdateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
         'https://github.com/BlusharkDigital/smart-spanish-translator/',
         __FILE__,
         'smart-spanish-translator'
@@ -188,6 +188,25 @@ function sst_meta_box_html($post) {
                         }, 3000);
                     });
         }
+
+        // Visually merge the ACF HrefLang Source box into this Spanish Translation box
+        document.addEventListener('DOMContentLoaded', function() {
+            var acfBox = document.getElementById('acf-group_sst_plugin_hreflang');
+            var sstBox = document.getElementById('sst_translation_box');
+            if (acfBox && sstBox) {
+                var acfInner = acfBox.querySelector('.inside');
+                var sstInner = sstBox.querySelector('.inside');
+                if (acfInner && sstInner) {
+                    var header = document.createElement('h3');
+                    header.innerHTML = 'HrefLang Settings';
+                    header.style.cssText = 'font-size:14px; font-weight:600; margin:15px 0 10px; padding:15px 0 0; border-top:1px solid #ddd;';
+                    sstInner.appendChild(header);
+                    
+                    sstInner.appendChild(acfInner);
+                    acfBox.style.display = 'none';
+                }
+            }
+        });
     </script>
     <?php
 }
@@ -226,6 +245,12 @@ function sst_translate_post($post_id, $force = false) {
     $is_manual = get_post_meta($post_id, '_sst_manual_translation', true);
     if ($is_manual === '1' && !$force) {
         return ['success' => false, 'message' => 'Skipped — manually translated.'];
+    }
+
+    // Skip if a manual Spanish translation URL is already assigned
+    $related_url = get_post_meta($post_id, 'related_lang_url', true);
+    if (!empty($related_url) && !$force) {
+        return ['success' => false, 'message' => 'Skipped — related Spanish URL already assigned.'];
     }
 
     $provider = get_option('sst_api_provider', 'claude');
@@ -764,12 +789,11 @@ function sst_add_language_switcher($items, $args) {
         $current_post_id = get_queried_object_id();
     }
 
-    if (function_exists('get_field') && !empty(get_field('related_lang_url', $current_post_id))) {
-        return $items;
-    }
-
+    $manual_lang = get_post_meta($current_post_id, 'current_page_language', true);
     $is_es = get_post_meta($current_post_id, '_sst_is_translation', true) === '1';
-    $is_en = !$is_es;
+    if ($manual_lang) {
+        $is_es = (strtolower($manual_lang) === 'spanish');
+    }
 
     if ($is_es) {
         // We're on a Spanish page — link back to the English source
@@ -783,6 +807,21 @@ function sst_add_language_switcher($items, $args) {
         $en_url = get_permalink($current_post_id) ?: home_url('/');
         $es_url = $es_post_id ? get_permalink($es_post_id) : null;
         $active_lang = 'en';
+    }
+
+    // Apply Related Lang URL override instead of hiding the dropdown
+    $custom_related_url = get_post_meta($current_post_id, 'related_lang_url', true);
+    if (!empty($custom_related_url)) {
+        if (is_array($custom_related_url) && isset($custom_related_url['url'])) {
+            $custom_related_url = $custom_related_url['url'];
+        }
+        if (is_string($custom_related_url) && !empty($custom_related_url)) {
+            if ($active_lang === 'en') {
+                $es_url = $custom_related_url;
+            } else {
+                $en_url = $custom_related_url;
+            }
+        }
     }
 
     $en_label = __('English', 'smart-spanish-translator');
@@ -1068,4 +1107,57 @@ register_activation_hook(__FILE__, function () {
 
 register_deactivation_hook(__FILE__, function () {
     flush_rewrite_rules();
+});
+
+// ─── ACF HrefLang Source Local Field Group ────────────────────────────────────
+add_action('acf/init', function() {
+    if (!function_exists('acf_add_local_field_group')) return;
+
+    $post_types = get_option('sst_post_types', ['post', 'page']);
+    if (!is_array($post_types)) $post_types = ['post', 'page'];
+    $locations = [];
+    foreach ($post_types as $pt) {
+        $locations[] = [
+            [
+                'param' => 'post_type',
+                'operator' => '==',
+                'value' => $pt,
+            ]
+        ];
+    }
+
+    acf_add_local_field_group(array(
+        'key' => 'group_sst_plugin_hreflang',
+        'title' => 'HrefLang Source',
+        'fields' => array(
+            array(
+                'key' => 'field_sst_plugin_lang',
+                'label' => 'Current Page Language',
+                'name' => 'current_page_language',
+                'type' => 'radio',
+                'choices' => array(
+                    'English' => 'English',
+                    'Spanish' => 'Spanish',
+                ),
+                'default_value' => 'English',
+                'layout' => 'vertical',
+                'return_format' => 'value',
+            ),
+            array(
+                'key' => 'field_sst_plugin_url',
+                'label' => 'Related Lang URL',
+                'name' => 'related_lang_url',
+                'type' => 'link',
+                'instructions' => 'If an existing Spanish or English page link is added here, it will overwrite the automatic page on the dropdown.',
+                'return_format' => 'url',
+            ),
+        ),
+        'location' => $locations,
+        'menu_order' => 0,
+        'position' => 'side',
+        'style' => 'default',
+        'label_placement' => 'top',
+        'instruction_placement' => 'label',
+        'active' => true,
+    ));
 });
