@@ -12,6 +12,18 @@ define('SST_VERSION', '1.0.0');
 define('SST_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 
+// ─── GitHub Updater ───────────────────────────────────────────────────────────
+if (file_exists(SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php')) {
+    require SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php';
+    $sstUpdateChecker = Puc_v4_Factory::buildUpdateChecker(
+        'https://github.com/BlusharkDigital/smart-spanish-translator/',
+        __FILE__,
+        'smart-spanish-translator'
+    );
+    // Optionally Set the branch that contains the stable release.
+    $sstUpdateChecker->setBranch('main');
+}
+
 // ─── Admin Menu ───────────────────────────────────────────────────────────────
 
 add_action('admin_menu', function () {
