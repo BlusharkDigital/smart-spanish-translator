@@ -16,9 +16,9 @@ define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 if (file_exists(SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php')) {
     require SST_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php';
     $sstUpdateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-        'https://github.com/BlusharkDigital/smart-spanish-translator/',
-        __FILE__,
-        'smart-spanish-translator'
+            'https://github.com/BlusharkDigital/smart-spanish-translator/',
+            __FILE__,
+            'smart-spanish-translator'
     );
     // Optionally Set the branch that contains the stable release.
     $sstUpdateChecker->setBranch('main');
@@ -190,7 +190,7 @@ function sst_meta_box_html($post) {
         }
 
         // Visually merge the ACF HrefLang Source box into this Spanish Translation box
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             var acfBox = document.getElementById('acf-group_sst_plugin_hreflang');
             var sstBox = document.getElementById('sst_translation_box');
             if (acfBox && sstBox) {
@@ -201,7 +201,7 @@ function sst_meta_box_html($post) {
                     header.innerHTML = 'HrefLang Settings';
                     header.style.cssText = 'font-size:14px; font-weight:600; margin:15px 0 10px; padding:15px 0 0; border-top:1px solid #ddd;';
                     sstInner.appendChild(header);
-                    
+
                     sstInner.appendChild(acfInner);
                     acfBox.style.display = 'none';
                 }
@@ -306,7 +306,50 @@ function sst_translate_post($post_id, $force = false) {
         update_post_meta($post_id, '_sst_es_post_id', $es_post_id);
     }
 
+    // --- Copy all meta (including featured image and WP page template) ---
+    $all_meta = get_post_meta($post_id);
+    if ($all_meta) {
+        foreach ($all_meta as $key => $values) {
+            // Exclude our plugin's internal meta and yoast (which gets translated later)
+            if (strpos($key, '_sst_') === 0 || strpos($key, '_yoast_') === 0) continue;
+            if (in_array($key, ['_edit_last', '_edit_lock', 'current_page_language', 'related_lang_url'])) continue;
+            
+            delete_post_meta($es_post_id, $key);
+            foreach ($values as $value) {
+                add_post_meta($es_post_id, $key, maybe_unserialize($value));
+            }
+        }
+    }
+    
+    // --- Translate ACF text fields recursively ---
+    if (function_exists('get_field_objects')) {
+        $fields = get_field_objects($post_id);
+        if ($fields) {
+            foreach ($fields as $field_key => $field) {
+                $translated_value = sst_translate_acf_value_recursive($field['value'], $field, $api_key, $provider);
+                update_field($field['key'], $translated_value, $es_post_id);
+            }
+        }
+    }
+
     update_post_meta($post_id, '_sst_last_synced', current_time('mysql'));
+
+    // Yoast SEO: translate title tag and meta description
+    $yoast_title = get_post_meta($post_id, '_yoast_wpseo_title', true);
+    $yoast_desc = get_post_meta($post_id, '_yoast_wpseo_metadesc', true);
+
+    if (!empty($yoast_title)) {
+        $translated_yoast_title = sst_call_translation_api($yoast_title, $api_key, $provider, true);
+        if ($translated_yoast_title) {
+            update_post_meta($es_post_id, '_yoast_wpseo_title', $translated_yoast_title);
+        }
+    }
+    if (!empty($yoast_desc)) {
+        $translated_yoast_desc = sst_call_translation_api($yoast_desc, $api_key, $provider, true);
+        if ($translated_yoast_desc) {
+            update_post_meta($es_post_id, '_yoast_wpseo_metadesc', $translated_yoast_desc);
+        }
+    }
 
     return ['success' => true, 'es_post_id' => $es_post_id];
 }
@@ -351,6 +394,81 @@ function sst_translate_slug($slug, $api_key, $provider) {
     $translated = trim($translated, '-');
 
     return $translated ?: $slug . '-es';
+}
+
+function sst_translate_acf_value_recursive($value, $field, $api_key, $provider) {
+    if (empty($value)) return $value;
+
+    $translatable_types = ['text', 'textarea', 'wysiwyg'];
+
+    if (in_array($field['type'], $translatable_types) && is_string($value)) {
+        $is_title = ($field['type'] === 'text');
+        return sst_call_translation_api($value, $api_key, $provider, $is_title);
+    }
+
+    if ($field['type'] === 'group' && is_array($value) && !empty($field['sub_fields'])) {
+        $translated_group = [];
+        $sub_fields_by_name = [];
+        foreach ($field['sub_fields'] as $sf) $sub_fields_by_name[$sf['name']] = $sf;
+        
+        foreach ($value as $sub_name => $sub_value) {
+            if (isset($sub_fields_by_name[$sub_name])) {
+                $translated_group[$sub_name] = sst_translate_acf_value_recursive($sub_value, $sub_fields_by_name[$sub_name], $api_key, $provider);
+            } else {
+                $translated_group[$sub_name] = $sub_value;
+            }
+        }
+        return $translated_group;
+    }
+
+    if ($field['type'] === 'repeater' && is_array($value) && !empty($field['sub_fields'])) {
+        $translated_repeater = [];
+        $sub_fields_by_name = [];
+        foreach ($field['sub_fields'] as $sf) $sub_fields_by_name[$sf['name']] = $sf;
+        
+        foreach ($value as $row) {
+            $translated_row = [];
+            foreach ($row as $sub_name => $sub_value) {
+                if (isset($sub_fields_by_name[$sub_name])) {
+                    $translated_row[$sub_name] = sst_translate_acf_value_recursive($sub_value, $sub_fields_by_name[$sub_name], $api_key, $provider);
+                } else {
+                    $translated_row[$sub_name] = $sub_value;
+                }
+            }
+            $translated_repeater[] = $translated_row;
+        }
+        return $translated_repeater;
+    }
+
+    if ($field['type'] === 'flexible_content' && is_array($value) && !empty($field['layouts'])) {
+        $translated_flex = [];
+        $layouts_by_name = [];
+        foreach ($field['layouts'] as $layout) $layouts_by_name[$layout['name']] = $layout;
+        
+        foreach ($value as $row) {
+            $layout_name = $row['acf_fc_layout'];
+            if (isset($layouts_by_name[$layout_name]) && !empty($layouts_by_name[$layout_name]['sub_fields'])) {
+                $sub_fields_by_name = [];
+                foreach ($layouts_by_name[$layout_name]['sub_fields'] as $sf) $sub_fields_by_name[$sf['name']] = $sf;
+                
+                $translated_row = ['acf_fc_layout' => $layout_name];
+                foreach ($row as $sub_name => $sub_value) {
+                    if ($sub_name === 'acf_fc_layout') continue;
+                    if (isset($sub_fields_by_name[$sub_name])) {
+                        $translated_row[$sub_name] = sst_translate_acf_value_recursive($sub_value, $sub_fields_by_name[$sub_name], $api_key, $provider);
+                    } else {
+                        $translated_row[$sub_name] = $sub_value;
+                    }
+                }
+                $translated_flex[] = $translated_row;
+            } else {
+                $translated_flex[] = $row;
+            }
+        }
+        return $translated_flex;
+    }
+
+    return $value;
 }
 
 function sst_call_translation_api($text, $api_key, $provider, $is_title = false) {
@@ -1038,11 +1156,11 @@ add_action('parse_request', function ($wp) {
         $post_type_obj = get_post_type_object($post->post_type);
         $query_var = $post_type_obj ? $post_type_obj->query_var : false;
 
+        $wp->query_vars['name'] = $post->post_name;
+        $wp->query_vars['post_type'] = $post->post_type;
+
         if ($query_var) {
             $wp->query_vars[$query_var] = $post->post_name;
-        } else {
-            $wp->query_vars['name'] = $post->post_name;
-            $wp->query_vars['post_type'] = $post->post_type;
         }
     }
 });
@@ -1110,11 +1228,13 @@ register_deactivation_hook(__FILE__, function () {
 });
 
 // ─── ACF HrefLang Source Local Field Group ────────────────────────────────────
-add_action('acf/init', function() {
-    if (!function_exists('acf_add_local_field_group')) return;
+add_action('acf/init', function () {
+    if (!function_exists('acf_add_local_field_group'))
+        return;
 
     $post_types = get_option('sst_post_types', ['post', 'page']);
-    if (!is_array($post_types)) $post_types = ['post', 'page'];
+    if (!is_array($post_types))
+        $post_types = ['post', 'page'];
     $locations = [];
     foreach ($post_types as $pt) {
         $locations[] = [
