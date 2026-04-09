@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Smart Spanish Translator
  * Description: Auto-translates WordPress content to Spanish, respecting manually translated pages.
- * Version: 1.1.1
+ * Version: 1.1.2
  * Author: Diana BluShark
  * Text Domain: smart-spanish-translator
  */
 defined('ABSPATH') || exit;
 
-define('SST_VERSION', '1.1.1');
+define('SST_VERSION', '1.1.2');
 define('SST_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 
