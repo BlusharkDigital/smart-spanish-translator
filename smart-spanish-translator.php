@@ -885,6 +885,32 @@ add_filter('wp_title', function ($title) {
     return $title;
 });
 
+// ─── Template Routing for Spanish Pages ───────────────────────────────────────
+
+function sst_is_spanish_page() {
+    if (is_admin()) return false;
+    if (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '/es/') !== false) return true;
+    $id = get_queried_object_id();
+    if ($id) {
+        if (get_post_meta($id, '_sst_is_translation', true) === '1') return true;
+        $lang = get_post_meta($id, 'current_page_language', true);
+        if ($lang && strtolower($lang) === 'spanish') return true;
+    }
+    return false;
+}
+
+add_filter('template_include', function ($template) {
+    if ($template && strpos($template, 'template-faqs.php') !== false) {
+        if (sst_is_spanish_page()) {
+            $spanish_template = locate_template('templates/spanish-faqs.php');
+            if ($spanish_template) {
+                return $spanish_template;
+            }
+        }
+    }
+    return $template;
+});
+
 // ─── Language Switcher ────────────────────────────────────────────────────────
 
 /**
