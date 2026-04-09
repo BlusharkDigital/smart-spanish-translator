@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Smart Spanish Translator
  * Description: Auto-translates WordPress content to Spanish, respecting manually translated pages.
- * Version: 1.1.3
+ * Version: 1.1.4
  * Author: Diana BluShark
  * Text Domain: smart-spanish-translator
  */
 defined('ABSPATH') || exit;
 
-define('SST_VERSION', '1.1.3');
+define('SST_VERSION', '1.1.4');
 define('SST_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -1295,13 +1295,28 @@ add_action('acf/init', function () {
     $post_types = get_option('sst_post_types', ['post', 'page']);
     if (!is_array($post_types))
         $post_types = ['post', 'page'];
+        
     $locations = [];
+    
+    // Add Post Types
     foreach ($post_types as $pt) {
         $locations[] = [
             [
                 'param' => 'post_type',
                 'operator' => '==',
                 'value' => $pt,
+            ]
+        ];
+    }
+    
+    // Add Public Taxonomies
+    $taxonomies = get_taxonomies(['public' => true], 'names');
+    foreach ($taxonomies as $tax) {
+        $locations[] = [
+            [
+                'param' => 'taxonomy',
+                'operator' => '==',
+                'value' => $tax,
             ]
         ];
     }
