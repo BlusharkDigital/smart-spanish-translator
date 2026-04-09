@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Smart Spanish Translator
  * Description: Auto-translates WordPress content to Spanish, respecting manually translated pages.
- * Version: 1.1.2
+ * Version: 1.1.3
  * Author: Diana BluShark
  * Text Domain: smart-spanish-translator
  */
 defined('ABSPATH') || exit;
 
-define('SST_VERSION', '1.1.2');
+define('SST_VERSION', '1.1.3');
 define('SST_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SST_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -925,36 +925,70 @@ function sst_add_language_switcher($items, $args) {
         return $items;
     }
 
-    //$current_post_id    = get_queried_object_id();
-    // Blog page special case
+    $current_obj = get_queried_object();
+    $is_term = ($current_obj instanceof WP_Term);
+
     if (is_home() && !is_front_page()) {
-        $current_post_id = (int) get_option('page_for_posts');
+        $current_id = (int) get_option('page_for_posts');
+        $is_term = false;
     } else {
-        $current_post_id = get_queried_object_id();
+        $current_id = get_queried_object_id();
     }
 
-    $manual_lang = get_post_meta($current_post_id, 'current_page_language', true);
-    $is_es = get_post_meta($current_post_id, '_sst_is_translation', true) === '1';
-    if ($manual_lang) {
-        $is_es = (strtolower($manual_lang) === 'spanish');
-    }
+    // Determine current language and related URLs based on object type
+    if ($is_term) {
+        $manual_lang = get_term_meta($current_id, 'current_page_language', true);
+        if (empty($manual_lang) && function_exists('get_field')) {
+            $manual_lang = get_field('current_page_language', 'term_' . $current_id);
+        }
+        $is_es = ($manual_lang && strtolower($manual_lang) === 'spanish');
 
-    if ($is_es) {
-        // We're on a Spanish page — link back to the English source
-        $source_id = get_post_meta($current_post_id, '_sst_source_post_id', true);
-        $en_url = $source_id ? get_permalink($source_id) : home_url('/');
-        $es_url = get_permalink($current_post_id);
-        $active_lang = 'es';
+        $custom_related_url = get_term_meta($current_id, 'related_lang_url', true);
+        if (empty($custom_related_url) && function_exists('get_field')) {
+            $custom_related_url = get_field('related_lang_url', 'term_' . $current_id);
+        }
+
+        if ($is_es) {
+            $es_url = get_term_link($current_id);
+            $en_url = home_url('/'); // Fallback if no related_lang_url is given
+            $active_lang = 'es';
+        } else {
+            $en_url = get_term_link($current_id);
+            $es_url = null;
+            $active_lang = 'en';
+        }
     } else {
-        // We're on an English page — link to the Spanish version if it exists
-        $es_post_id = get_post_meta($current_post_id, '_sst_es_post_id', true);
-        $en_url = get_permalink($current_post_id) ?: home_url('/');
-        $es_url = $es_post_id ? get_permalink($es_post_id) : null;
-        $active_lang = 'en';
+        $manual_lang = get_post_meta($current_id, 'current_page_language', true);
+        if (empty($manual_lang) && function_exists('get_field')) {
+            $manual_lang = get_field('current_page_language', $current_id);
+        }
+
+        $is_es = get_post_meta($current_id, '_sst_is_translation', true) === '1';
+        if ($manual_lang) {
+            $is_es = (strtolower($manual_lang) === 'spanish');
+        }
+
+        $custom_related_url = get_post_meta($current_id, 'related_lang_url', true);
+        if (empty($custom_related_url) && function_exists('get_field')) {
+            $custom_related_url = get_field('related_lang_url', $current_id);
+        }
+
+        if ($is_es) {
+            // We're on a Spanish page — link back to the English source
+            $source_id = get_post_meta($current_id, '_sst_source_post_id', true);
+            $en_url = $source_id ? get_permalink($source_id) : home_url('/');
+            $es_url = get_permalink($current_id);
+            $active_lang = 'es';
+        } else {
+            // We're on an English page — link to the Spanish version if it exists
+            $es_post_id = get_post_meta($current_id, '_sst_es_post_id', true);
+            $en_url = get_permalink($current_id) ?: home_url('/');
+            $es_url = $es_post_id ? get_permalink($es_post_id) : null;
+            $active_lang = 'en';
+        }
     }
 
     // Apply Related Lang URL override instead of hiding the dropdown
-    $custom_related_url = get_post_meta($current_post_id, 'related_lang_url', true);
     if (!empty($custom_related_url)) {
         if (is_array($custom_related_url) && isset($custom_related_url['url'])) {
             $custom_related_url = $custom_related_url['url'];
